@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Particle Controller</title>
+    <!-- Modern Display & UI Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Heavyweight Libraries via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    screens: {
+                        'xs': '480px'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Poppins', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background-color: #050508;
+            color: #ffffff;
+            overflow: hidden;
+            user-select: none;
+        }
+        .glass-panel {
+            background: rgba(8, 12, 30, 0.75);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.82);
+        }
+        .neon-glow-cyan {
+            box-shadow: 0 0 20px rgba(77, 238, 234, 0.2);
+            border-color: rgba(77, 238, 234, 0.4);
+        }
+        .neon-glow-pink {
+            box-shadow: 0 0 20px rgba(247, 37, 133, 0.2);
+            border-color: rgba(247, 37, 133, 0.4);
+        }
+        .bg-cyber-radial {
+            background: radial-gradient(circle at 50% 50%, #0c122c 0%, #050508 100%);
+        }
+        /* Custom delicate futuristic scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.15);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(77, 238, 234, 0.25);
+            border-radius: 9px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(77, 238, 234, 0.55);
+        }
+        
+        /* Support sliding panel transitions for high-end mobile & desktop optimization */
+        #left-hud-panel {
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            transform-origin: left center;
+        }
+        #left-hud-panel.collapsed {
+            transform: translateX(-400px);
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        #camera-widget-panel {
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            transform-origin: right bottom;
+        }
+        #camera-widget-panel.collapsed {
+            transform: scale(0.7) translate(50px, 50px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @media (max-width: 1024px) {
+            #left-hud-panel {
+                max-width: 330px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            #left-hud-panel {
+                max-width: 100%;
+            }
+            #left-hud-panel.collapsed {
+                transform: translateY(100vh);
+                opacity: 0;
+                pointer-events: none;
+            }
+        }
+    </style>
+</head>
+<body class="bg-cyber-radial w-screen h-screen relative select-none">
+
+    <!-- BACKGROUND WEBGL CANVAS CONTAINER -->
+    <div id="canvas-container" class="absolute inset-0 w-full h-full z-0"></div>
+
+    <!-- MAIN SCI-FI HUD GRAPHICAL OVERLAY -->
+    <div id="hud-overlay" class="absolute inset-0 w-full h-full z-10 pointer-events-none flex flex-col justify-between p-3 sm:p-6">
+        
+        <!-- TOP DECORATOR STATUS BAR -->
+        <div class="w-full flex justify-between items-center opacity-85">
+            <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+                <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#4deeea]"></span>
+                <span class="font-mono text-[9px] tracking-[0.25em] text-cyan-400 font-semibold uppercase hidden sm:inline-block">SYSTEM ONLINE</span>
+                
+                <!-- HUD Console Toggle Button -->
+                <button id="topbar-toggle-hud" class="ml-1 sm:ml-2 py-1 px-2.5 rounded bg-cyan-950/40 border border-cyan-800 text-[8.5px] font-mono tracking-wider font-bold text-cyan-400 hover:text-white hover:border-cyan-500/40 transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer shadow-[0_0_8px_rgba(34,211,238,0.25)]">
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span> CONSOLE [H]
+                </button>
+            </div>
+            
+            <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+                <!-- Webcam stream Toggle Button -->
+                <button id="topbar-toggle-camera" class="py-1 px-2.5 rounded bg-pink-950/40 border border-pink-800 text-[8.5px] font-mono tracking-wider font-bold text-pink-500 hover:text-white hover:border-pink-500/40 transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer shadow-[0_0_8px_rgba(244,63,94,0.25)]">
+                    <span class="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span> STREAM [C]
+                </button>
+                <div class="font-mono text-[9px] tracking-[0.15em] text-slate-400 hidden md:block">
+                    UTC: <span id="clock-display" class="text-slate-200">18:46:49</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN LAYOUT: LEFT CONTROLLER & BOTTOM RIGHT CAMERA PREVIEW -->
+        <div class="w-full h-full flex justify-between items-start mt-2 mb-2 sm:mt-4 sm:mb-4 relative">
+            
+            <!-- LEFT GLASSHUD BAR (FIXED WIDTH, SCROLLABLE) -->
+            <div id="left-hud-panel" class="w-full sm:w-[345px] max-h-[80vh] sm:max-h-[85vh] overflow-y-auto glass-panel pointer-events-auto rounded-2xl p-4 sm:p-5 flex flex-col gap-4 sm:gap-5 transition-all duration-300 custom-scrollbar pr-3">
+                
+                <!-- UPPER SECTION: BRAND & TITLE -->
+                <div>
+                    <div class="flex justify-between items-start">
+                        <span class="font-mono text-[8px] tracking-[0.3em] text-cyan-400 font-bold uppercase py-0.5 px-2 bg-cyan-950/50 border border-cyan-800/40 rounded-md">V1.5 ULTRA</span>
+                        <div class="flex items-center gap-1.5 font-mono text-[9.5px] text-slate-400">
+                            <span id="status-dot" class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.7)] animate-ping"></span>
+                            <span id="status-text" class="font-bold">CAMERA WAITING</span>
+                        </div>
+                    </div>
+                    <h1 class="font-display font-extrabold text-[19px] tracking-tight text-white uppercase mt-2.5">
+                        Gesture Particle <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500">Controller</span>
+                    </h1>
+                    <p class="text-slate-400 font-sans text-[11px] mt-1 leading-relaxed">
+                        Control 35,000 particles using computer vision. Fully supports dual hand attraction fields, custom geometries & advanced shaders.
+                    </p>
+                </div>
+
+                <!-- SELECTOR CONTROLLER MODE -->
+                <div class="grid grid-cols-2 bg-slate-950/80 border border-slate-800 p-1 rounded-xl">
+                    <button id="mode-auto" class="py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-cyan-400 bg-cyan-950/30 border border-cyan-900/50 transition-all cursor-pointer">
+                        AUTO FEED
+                    </button>
+                    <button id="mode-manual" class="py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-slate-500 transition-all cursor-pointer">
+                        CONSOLE ONLY
+                    </button>
+                </div>
+
+                <!-- CORE GESTURE DIAGNOSTIC CAPSULE -->
+                <div class="border border-slate-800 bg-slate-950/50 p-4 rounded-xl flex items-center justify-between">
+                    <div>
+                        <div class="text-[9px] font-mono tracking-widest text-slate-400 uppercase">Recognized Waveform</div>
+                        <div id="gesture-name" class="font-display font-extrabold text-[15px] text-cyan-400 mt-1 uppercase tracking-wide">SPHERE CONFIG</div>
+                        <div class="text-[9.5px] font-mono text-slate-400 mt-0.5">Smooth spatial interpolation</div>
+                    </div>
+                    <div class="flex flex-col items-center justify-center bg-slate-950 border border-slate-800 w-12 h-12 rounded-xl shadow-inner">
+                        <span class="text-[7.5px] font-mono text-slate-500 uppercase leading-none mb-1">Finger</span>
+                        <span id="gesture-count" class="font-display font-extrabold text-[22px] text-white leading-none">1</span>
+                    </div>
+                </div>
+
+                <!-- SPATIAL ALIGNMENT telemetric COMPASS -->
+                <div class="border border-slate-800/60 bg-slate-950/40 rounded-xl p-3">
+                    <div class="text-[9px] text-slate-400 font-mono tracking-widest uppercase mb-2">Primary Spatial Vector</div>
+                    <div class="grid grid-cols-3 gap-1 text-center text-[10px] font-mono font-bold text-slate-700">
+                        <div></div>
+                        <div id="dir-up" class="py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200">UP</div>
+                        <div></div>
+                        
+                        <div id="dir-left" class="py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200">LEFT</div>
+                        <div id="dir-center" class="py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200">CENTER</div>
+                        <div id="dir-right" class="py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200">RIGHT</div>
+                        
+                        <div></div>
+                        <div id="dir-down" class="py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200">DOWN</div>
+                        <div></div>
+                    </div>
+                </div>
+
+                <!-- COHESION TENSION METERS -->
+                <div class="px-1">
+                    <div class="flex justify-between items-center text-[9px] text-slate-400 font-mono tracking-widest mb-1.5">
+                        <span>COHESION EXPANSION</span>
+                        <span id="tension-percentage" class="text-cyan-400">100%</span>
+                    </div>
+                    <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                        <div id="tension-bar" class="bg-gradient-to-r from-cyan-400 to-pink-500 h-full rounded-full transition-all duration-100" style="width: 100%"></div>
+                    </div>
+                    <div class="flex justify-between text-[8px] text-slate-500 font-mono mt-1">
+                        <span>CONSOLIDATED (0)</span>
+                        <span>SCATTERED (1)</span>
+                    </div>
+                </div>
+
+                <!-- MANUAL BUTTON GRAPHICS OVERRIDE -->
+                <div class="flex flex-col gap-2 border-t border-slate-900 pt-3">
+                    <div class="text-[9px] font-mono tracking-widest text-slate-400 uppercase mb-1">State Geometry Modulators</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="btn-scatter" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-400 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> 0 // SCATTER
+                        </button>
+                        <button id="btn-sphere" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span> 1 // SPHERE
+                        </button>
+                        <button id="btn-cube" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span> 2 // CUBE
+                        </button>
+                        <button id="btn-heart" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-pink-500"></span> 3 // HEART
+                        </button>
+                        <button id="btn-saturn" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span> 4 // SATURN
+                        </button>
+                        <button id="btn-vortex" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 5 // VORTEX
+                        </button>
+                        <button id="btn-torus" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-yellow-400"></span> 6 // TORUS
+                        </button>
+                        <button id="btn-helix" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-cyan-300"></span> 7 // HELIX
+                        </button>
+                        <button id="btn-terrain" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> 8 // TERRAIN
+                        </button>
+                        <button id="btn-octahedron" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-teal-400"></span> 9 // OCTAHEDRON
+                        </button>
+                        <button id="btn-galaxy" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span> 10 // GALAXY
+                        </button>
+                        <button id="btn-mobius" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> 11 // MÖBIUS
+                        </button>
+                        <button id="btn-lorenz" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400"></span> 12 // LORENZ
+                        </button>
+                        <button id="btn-dome" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-lime-400"></span> 13 // GEODOME
+                        </button>
+                        <button id="btn-supernova" class="py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-white transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5 col-span-2">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span> 14 // SUPERNOVA
+                        </button>
+                    </div>
+                </div>
+
+                <!-- NEURAL POST-PROCESSING SHADERS -->
+                <div class="flex flex-col gap-3 border-t border-slate-900 pt-3">
+                    <div class="text-[9px] font-mono tracking-widest text-slate-400 uppercase">Sci-Fi Post Process Shaders</div>
+                    
+                    <!-- Bloom Slider -->
+                    <div class="flex flex-col gap-1.5 px-0.5">
+                        <div class="flex justify-between items-center text-[9px] font-mono text-slate-400">
+                            <span>GLOWING BLOOM INTENSITY</span>
+                            <span id="label-val-bloom" class="text-cyan-400 font-bold">1.2x</span>
+                        </div>
+                        <input id="slider-bloom" type="range" min="0" max="3" step="0.1" value="1.2" class="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-400 border border-slate-800">
+                    </div>
+
+                    <!-- Chromatic Aberration Slider -->
+                    <div class="flex flex-col gap-1.5 px-0.5">
+                        <div class="flex justify-between items-center text-[9px] font-mono text-slate-400">
+                            <span>CHROMATIC ABERRATION</span>
+                            <span id="label-val-chromatic" class="text-pink-500 font-bold">0.4x</span>
+                        </div>
+                        <input id="slider-chromatic" type="range" min="0" max="3" step="0.1" value="0.4" class="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-pink-500 border border-slate-800">
+                    </div>
+
+                    <!-- Scanline Glitch Slider -->
+                    <div class="flex flex-col gap-1.5 px-0.5">
+                        <div class="flex justify-between items-center text-[9px] font-mono text-slate-400">
+                            <span>SCANLINE GLITCH SPEED</span>
+                            <span id="label-val-glitch" class="text-emerald-400 font-bold">0.2x</span>
+                        </div>
+                        <input id="slider-glitch" type="range" min="0" max="2" step="0.1" value="0.2" class="w-full h-1 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-emerald-400 border border-slate-800">
+                    </div>
+                </div>
+
+                <!-- DUAL HANDS GRAV FIELD MONITOR -->
+                <div class="flex flex-col gap-2 border-t border-slate-900 pt-3">
+                    <div class="text-[9px] font-mono tracking-widest text-slate-400 uppercase">Dual-Hand Attraction Core</div>
+                    <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[9px] font-mono text-slate-400">ATTRACTOR ENGAGED:</span>
+                            <span id="h2-status" class="text-[8.5px] font-mono font-bold text-slate-500 bg-slate-950 py-0.5 px-2 rounded border border-slate-800 tracking-wider">DISCONNECTED</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-[9px] font-mono text-slate-400">FORCE MULTIPLIER:</span>
+                            <span id="h2-mode" class="text-[9.5px] font-mono font-bold text-slate-500">-</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1 text-[8.5px] font-mono text-slate-500 bg-slate-950/90 p-1.5 rounded-lg border border-slate-900/60">
+                            <div>X: <span id="h2-coord-x" class="text-cyan-400 font-bold">-</span></div>
+                            <div>Y: <span id="h2-coord-y" class="text-pink-500 font-bold">-</span></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- BOTTOM-RIGHT CAMERA WIDGET -->
+            <div id="camera-widget-panel" class="absolute bottom-0 right-0 pointer-events-auto flex flex-col gap-1.5 sm:gap-2 items-end">
+                <div class="flex items-center gap-2 bg-slate-950/80 px-2.5 py-1 rounded-md border border-slate-800 text-[8.5px] font-mono text-slate-400 tracking-wider hidden xs:flex">
+                    <span id="prev-overlay-indicator" class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                    <span>HD WEBCAM PRO STREAM</span>
+                </div>
+                <div class="relative w-[110px] h-[85px] xs:w-[140px] xs:h-[110px] sm:w-[180px] sm:h-[140px] rounded-xl overflow-hidden glass-panel border border-slate-800 shadow-2xl transition-all duration-300">
+                    <!-- HIDDEN RAW VIDEO CAPTURE -->
+                    <video id="webcam-video" style="display:none;" playsinline muted></video>
+                    <!-- MIRRORED RENDER OVERLAY CANVAS -->
+                    <canvas id="camera-canvas" class="w-full h-full object-cover transform scale-x-[-1]"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- AUDIO FREQUENCY STYLING WARNING TOAST -->
+    <div id="toast-warning" class="absolute top-6 left-1/2 -translate-x-1/2 glass-panel border-amber-500/30 text-amber-200 px-4 py-3 rounded-xl z-50 text-xs flex items-center gap-3 transition-all duration-500 transform translate-y-[-100px] opacity-0 pointer-events-none">
+        <div class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></div>
+        <div>
+            <span class="font-bold">CONSOLE OVERLAY ENGAGED:</span> Webcam input blocked or no camera detected. Playground controller enabled.
+        </div>
+        <button id="close-toast" class="ml-4 text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+    </div>
+
+    <!-- PRELAUNCH CINEMATIC LOADING ELEMENT -->
+    <div id="loading-overlay" class="absolute inset-0 bg-[#050508] z-50 flex flex-col items-center justify-center transition-all duration-700">
+        <div class="max-w-md text-center p-8 flex flex-col items-center">
+            <div class="w-16 h-16 relative flex items-center justify-center mb-8">
+                <!-- Glowing futuristic neon spinner -->
+                <div class="absolute inset-0 rounded-full border-4 border-slate-900 border-t-cyan-400 border-r-pink-500 animate-spin"></div>
+                <div class="w-10 h-10 rounded-full border-2 border-slate-900 animate-pulse bg-slate-950"></div>
+            </div>
+            
+            <h2 class="font-display font-extrabold text-[22px] tracking-widest text-white uppercase">
+                QUANTUM SYSTEM INITIALIZING
+            </h2>
+            <p id="loading-text" class="text-cyan-400 font-mono text-[9px] tracking-[0.2em] uppercase mt-2.5 pulse-slow">
+                STAGING THREE.JS SHADER COMPILING...
+            </p>
+            
+            <div class="w-64 bg-slate-900 h-1 rounded-full mt-6 overflow-hidden border border-slate-950">
+                <div id="loading-progress" class="bg-gradient-to-r from-cyan-400 to-pink-500 h-full w-[10%] transition-all duration-300"></div>
+            </div>
+            
+            <button id="skip-loader-btn" class="mt-8 py-2 px-5 rounded-lg border border-slate-800 bg-slate-950 font-mono text-[9px] font-bold tracking-widest text-slate-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all duration-300 cursor-pointer">
+                SKIP TO OFFLINE CONSOLE
+            </button>
+        </div>
+    </div>
+
+    <!-- SYSTEM MODULES SCRIPT -->
+    <script>
+        // -------------------------------------------------------------
+        // HELPER FUNCTIONS & MATHS PRESETS
+        // -------------------------------------------------------------
+        
+        // HSL helper (replaces tinycolor library for compact, leakproof code)
+        function hslToRgb(h, s, l) {
+            h /= 360;
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l; 
+            } else {
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                const hue2rgb = (t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                r = hue2rgb(h + 1/3);
+                g = hue2rgb(h);
+                b = hue2rgb(h - 1/3);
+            }
+            return { r, g, b };
+        }
+
+        // -------------------------------------------------------------
+        // APPLICATION CONSTANTS & DIAGNOSTICS
+        // -------------------------------------------------------------
+        const CONFIG = {
+            particleCount: 35000,
+            particleSize: 0.34,
+            lerpSpeed: 0.08,             // Sizzling smooth transition speed
+            wobbleAmplitude: 0.35,
+            wobbleSpeed: 2.2,
+            baseRotationSpeed: 0.003
+        };
+
+        // UI Indicators list
+        const SCENE_STATES = [
+            { id: 0, count: 0, name: "QUANTUM SCATTER", color: "#64748b" }, // Silver
+            { id: 1, count: 1, name: "RESONATING SPHERE", color: "#4deeea" }, // Cyan
+            { id: 2, count: 2, name: "HYPERDIMENSIONAL CUBE", color: "#f97316" }, // Orange-gold
+            { id: 3, count: 3, name: "AMOROUS PULSE", color: "#f72585" }, // Neon Pink
+            { id: 4, count: 4, name: "SATURN EXPANSION", color: "#a855f7" }, // Purple
+            { id: 5, count: 5, name: "VORTEX SPIRAL", color: "#10b981" },  // Green/Rainbow
+            { id: 6, count: 6, name: "TORUS KNOT", color: "#facc15" },     // Gold
+            { id: 7, count: 7, name: "CYBER DNA HELIX", color: "#67e8f9" }, // Electric Cyan
+            { id: 8, count: 8, name: "MORPHING TERRAIN", color: "#fbbf24" }, // Wave Amber
+            { id: 9, count: 9, name: "OCTAHEDRAL BEACON", color: "#14b8a6" }, // Teal
+            { id: 10, count: 10, name: "GALAXY COLLIDER", color: "#fb7185" }, // Rose
+            { id: 11, count: 11, name: "MÖBIUS RESONATOR", color: "#60a5fa" }, // Sapphire/Light Blue
+            { id: 12, count: 12, name: "LORENZ ATTRACTOR", color: "#e879f9" }, // Fuchsia
+            { id: 13, count: 13, name: "GEODESIC DOME", color: "#a3e635" }, // Lime
+            { id: 14, count: 14, name: "SUPERNOVA EXPLOSION", color: "#f87171" } // Fire Red
+        ];
+
+        let mode = 'auto'; // 'auto' (webcam) or 'manual' (override)
+        let activeStateId = 1; // Default: Sphere
+        let isHandActive = false;
+        let tensionLevel = 1.0;
+        let prevFingerCount = 1;
+        let lastHandActiveTime = 0;
+        
+        // Primary Hand coordinates (-0.5 to 0.5 center offset)
+        let handX = 0, handY = 0;
+
+        // Secondary Hand trackers
+        let isHand2Active = false;
+        let hand2X = 0, hand2Y = 0;
+        let hand2Tension = 1.0;
+        let hand2Fingers = 5;
+
+        // Custom post-processing shader params
+        let shaderParams = {
+            bloom: 1.2,
+            chromatic: 0.4,
+            glitch: 0.2
+        };
+
+        // -------------------------------------------------------------
+        // SHAPE SHADERS INITIALIZATION & MATH DESIGN
+        // -------------------------------------------------------------
+        let shapesData = [];
+
+        function designQuantumShapes() {
+            // Setup offscreen canvas scanner for silhouettes (Heart, Saturn)
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+
+            const addShape = (id, pos, col) => {
+                shapesData[id] = {
+                    positions: new Float32Array(pos),
+                    colors: new Float32Array(col)
+                };
+            };
+
+            // ------------------ SHAPE 0: RANDOM SCATTER ------------------
+            const pos0 = [], col0 = [];
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const r = 24 + Math.random() * 24;
+                pos0.push(
+                    r * Math.sin(phi) * Math.cos(theta),
+                    r * Math.sin(phi) * Math.sin(theta),
+                    r * Math.cos(phi)
+                );
+                col0.push(0.35, 0.4, 0.45); // cool tech gray
+            }
+            addShape(0, pos0, col0);
+
+            // ------------------ SHAPE 1: FIBONACCI SPHERE ------------------
+            const pos1 = [], col1 = [];
+            const phiGolden = Math.PI * (3 - Math.sqrt(5));
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const y = 1 - (i / (CONFIG.particleCount - 1)) * 2;
+                const radiusAtY = Math.sqrt(1 - y * y);
+                const theta = phiGolden * i;
+                const r = 13.5;
+                
+                pos1.push(
+                    Math.cos(theta) * radiusAtY * r,
+                    y * r,
+                    Math.sin(theta) * radiusAtY * r
+                );
+
+                // Elegant blue to cyan radial coloring
+                const rBlend = 0.1 + (y + 1) * 0.1;
+                const gBlend = 0.5 + y * 0.3;
+                const bBlend = 0.95;
+                col1.push(rBlend, gBlend, bBlend);
+            }
+            addShape(1, pos1, col1);
+
+            // ------------------ SHAPE 2: 3D BOX SURFACE ------------------
+            const pos2 = [], col2 = [];
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const face = Math.floor(Math.random() * 6);
+                let x = 0, y = 0, z = 0;
+                const u = (Math.random() - 0.5) * 21;
+                const v = (Math.random() - 0.5) * 21;
+                const hSide = 10.5;
+
+                switch(face) {
+                    case 0: x = hSide; y = u; z = v; break;
+                    case 1: x = -hSide; y = u; z = v; break;
+                    case 2: x = u; y = hSide; z = v; break;
+                    case 3: x = u; y = -hSide; z = v; break;
+                    case 4: x = u; y = v; z = hSide; break;
+                    case 5: x = u; y = v; z = -hSide; break;
+                }
+                pos2.push(x, y, z);
+                
+                // Rich golden red core blend
+                const mix = Math.random();
+                col2.push(1.0, 0.35 + mix * 0.45, 0.0);
+            }
+            addShape(2, pos2, col2);
+
+            // ------------------ SHAPE 3: INFLATED LUSH HEART ------------------
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 128, 128);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            // Draw a detailed heart shape
+            ctx.moveTo(64, 42);
+            ctx.bezierCurveTo(64, 20, 22, 20, 22, 58);
+            ctx.bezierCurveTo(22, 94, 64, 118, 64, 118);
+            ctx.bezierCurveTo(64, 118, 106, 94, 106, 58);
+            ctx.bezierCurveTo(106, 20, 64, 20, 64, 42);
+            ctx.fill();
+
+            const heartImg = ctx.getImageData(0, 0, 128, 128);
+            const heartPixels = [];
+            for (let py = 0; py < 128; py += 1) {
+                for (let px = 0; px < 128; px += 1) {
+                    const idx = (py * 128 + px) * 4;
+                    if (heartImg.data[idx] > 120) {
+                        heartPixels.push({ x: px, y: py });
+                    }
+                }
+            }
+
+            const pos3 = [], col3 = [];
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const pixel = heartPixels[Math.floor(Math.random() * heartPixels.length)];
+                const rx = (pixel.x - 64) * 0.32;
+                const ry = -(pixel.y - 64) * 0.32 + 2; // Center offset adjusted
+                
+                // Depth modeling
+                const distOffset = Math.hypot(pixel.x - 64, pixel.y - 60) / 64;
+                const depthScale = Math.max(0, 1.0 - distOffset) * 7.5;
+                const rz = (Math.random() - 0.5) * depthScale;
+
+                pos3.push(rx, ry, rz);
+
+                // Neon coral gradient coloring
+                const mix = Math.random();
+                col3.push(0.96, 0.10 + mix * 0.15, 0.35 + mix * 0.2);
+            }
+            addShape(3, pos3, col3);
+
+            // ------------------ SHAPE 4: SATURN & ORBITAL RING ------------------
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 128, 128);
+            
+            // Core planet (Red Channel)
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            ctx.arc(64, 64, 24, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Ring geometry (Blue Channel)
+            ctx.strokeStyle = '#0000ff';
+            ctx.lineWidth = 12;
+            ctx.beginPath();
+            ctx.ellipse(64, 64, 52, 13, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            const saturnImg = ctx.getImageData(0, 0, 128, 128);
+            const planetPool = [], ringPool = [];
+            for (let py = 0; py < 128; py++) {
+                for (let px = 0; px < 128; px++) {
+                    const idx = (py * 128 + px) * 4;
+                    if (saturnImg.data[idx] > 150 && saturnImg.data[idx+2] < 100) {
+                        planetPool.push({ x: px, y: py });
+                    } else if (saturnImg.data[idx+2] > 150 && saturnImg.data[idx] < 100) {
+                        ringPool.push({ x: px, y: py });
+                    }
+                }
+            }
+
+            const pos4 = [], col4 = [];
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                // Split distribution: 40% planet sphere, 60% flat orbits
+                if (i < CONFIG.particleCount * 0.42 && planetPool.length > 0) {
+                    const p = planetPool[Math.floor(Math.random() * planetPool.length)];
+                    const rx = (p.x - 64) * 0.28;
+                    const ry = -(p.y - 64) * 0.28;
+                    
+                    // Inflate mathematically to a perfectly smooth 3D sphere from circular silhouette
+                    const R = 24 * 0.28;
+                    const cRadius = Math.hypot(rx, ry);
+                    const mz = Math.sqrt(Math.max(0, R*R - cRadius*cRadius));
+                    const rz = (Math.random() * 2 - 1) * mz;
+                    
+                    pos4.push(rx, ry, rz);
+                    // Mystique cosmic indigo shader
+                    const mix = Math.random();
+                    col4.push(0.35 + mix * 0.15, 0.1, 0.72 + mix * 0.25);
+                } else if (ringPool.length > 0) {
+                    // Tilted flat orbital belt
+                    const p = ringPool[Math.floor(Math.random() * ringPool.length)];
+                    const rx = (p.x - 64) * 0.38;
+                    const ry = -(p.y - 64) * 0.38;
+                    const rz = (Math.random() - 0.5) * 1.0;
+
+                    // Rotational tilted plane transform matrix around X and Z axis
+                    const tiltX = 0.50; 
+                    const tiltZ = 0.15;
+                    
+                    let currY = ry * Math.cos(tiltX) - rz * Math.sin(tiltX);
+                    let currZ = ry * Math.sin(tiltX) + rz * Math.cos(tiltX);
+                    let currX = rx * Math.cos(tiltZ) - currY * Math.sin(tiltZ);
+                    currY = rx * Math.sin(tiltZ) + currY * Math.cos(tiltZ);
+
+                    pos4.push(currX, currY, currZ);
+                    // Luminous Amber Gold coloring
+                    const mix = Math.random();
+                    col4.push(0.95, 0.65 + mix * 0.25, 0.05);
+                } else {
+                    pos4.push(0, 0, 0);
+                    col4.push(1, 1, 1);
+                }
+            }
+            addShape(4, pos4, col4);
+
+            // ------------------ SHAPE 5: NEBULA SPIRAL BLUST ------------------
+            const pos5 = [], col5 = [];
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const track = i % 8;
+                const baseAngle = track * (Math.PI * 2 / 8);
+                const t = Math.pow(Math.random(), 1.15); // logarithmic scale density
+                
+                const r = t * 27 + Math.random() * 1.2;
+                const angle = baseAngle + t * Math.PI * 5.5;
+                const ry = (t * 6.5) - 3.25 + (Math.random() - 0.5) * 1.5;
+
+                pos5.push(
+                    Math.cos(angle) * r,
+                    ry,
+                    Math.sin(angle) * r
+                );
+
+                // Harmonious multi-arm spectral color mapping
+                const hue = (track * (360 / 8) + t * 60) % 360;
+                const rgb = hslToRgb(hue, 0.95, 0.62);
+                col5.push(rgb.r, rgb.g, rgb.b);
+            }
+            addShape(5, pos5, col5);
+
+            // ------------------ SHAPE 6: TORUS KNOT ------------------
+            const pos6 = [], col6 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const t = (i / CONFIG.particleCount) * Math.PI * 2 * 16;
+                const p = 2;
+                const q = 3;
+                const r = 4.2 + 2.1 * Math.cos(q * t);
+                const x = r * Math.cos(p * t);
+                const y = r * Math.sin(p * t);
+                const z = 2.1 * Math.sin(q * t);
+                
+                pos6.push(x * 1.8, y * 1.8, z * 2.2);
+                
+                const hue = (t * 22) % 360;
+                const rgb = hslToRgb(hue, 0.95, 0.55);
+                col6.push(rgb.r, rgb.g, rgb.b);
+            }
+            addShape(6, pos6, col6);
+
+            // ------------------ SHAPE 7: CYBER DNA DOUBLE HELIX ------------------
+            const pos7 = [], col7 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const strand = i % 2;
+                const t = (i / CONFIG.particleCount) * Math.PI * 18;
+                const r = 6.2;
+                const phase = strand * Math.PI;
+                
+                const x = r * Math.cos(t + phase);
+                const z = r * Math.sin(t + phase);
+                const y = (t - Math.PI * 9) * 1.1;
+                
+                let finalX = x;
+                let finalY = y;
+                let finalZ = z;
+                let rRGB = 0, gRGB = 0, bRGB = 0;
+
+                if (Math.random() < 0.22) {
+                    const lerpVal = Math.random();
+                    const base1X = r * Math.cos(t);
+                    const base1Z = r * Math.sin(t);
+                    const base2X = r * Math.cos(t + Math.PI);
+                    const base2Z = r * Math.sin(t + Math.PI);
+                    finalX = base1X + (base2X - base1X) * lerpVal;
+                    finalZ = base1Z + (base2Z - base1Z) * lerpVal;
+                    
+                    rRGB = 0.85; gRGB = 0.85; bRGB = 0.85;
+                } else {
+                    if (strand === 0) {
+                        rRGB = 0.25; gRGB = 0.85; bRGB = 1.0;
+                    } else {
+                        rRGB = 0.95; gRGB = 0.65; bRGB = 0.1;
+                    }
+                }
+                pos7.push(finalX, finalY, finalZ);
+                col7.push(rRGB, gRGB, bRGB);
+            }
+            addShape(7, pos7, col7);
+
+            // ------------------ SHAPE 8: PARAMETRIC TERRAIN GRID ------------------
+            const pos8 = [], col8 = [];
+            const cols = Math.floor(Math.sqrt(CONFIG.particleCount));
+            const spacing = 0.82;
+            const startX = - (cols * spacing) / 2;
+            const startZ = - (cols * spacing) / 2;
+
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const rIdx = Math.floor(i / cols);
+                const cIdx = i % cols;
+                
+                const px = startX + cIdx * spacing;
+                const pz = startZ + rIdx * spacing;
+                
+                const distFromCenter = Math.hypot(px, pz);
+                const py = Math.sin(distFromCenter * 0.4) * 3.8 + Math.cos(px * 0.3) * Math.sin(pz * 0.3) * 2.2 - 2.0;
+
+                pos8.push(px, py, pz);
+
+                const factor = (py + 6) / 10;
+                col8.push(factor * 0.1, 0.45 + factor * 0.55, 0.85 - factor * 0.5);
+            }
+            addShape(8, pos8, col8);
+
+            // ------------------ SHAPE 9: OCTAHEDRAL BEACON ------------------
+            const pos9 = [], col9 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                if (i < CONFIG.particleCount * 0.70) {
+                    // 70% Octahedral core lattice
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const kx = Math.sin(phi) * Math.cos(theta);
+                    const ky = Math.sin(phi) * Math.sin(theta);
+                    const kz = Math.cos(phi);
+                    const absSum = Math.abs(kx) + Math.abs(ky) + Math.abs(kz) + 0.0001;
+                    
+                    const scaleFactor = 12.5;
+                    const ox = (kx / absSum) * scaleFactor;
+                    const oy = (ky / absSum) * scaleFactor;
+                    const oz = (kz / absSum) * scaleFactor;
+                    
+                    pos9.push(ox, oy, oz);
+                    
+                    // Jade / Emerald cyan gradient
+                    const mix = Math.random();
+                    col9.push(0.04, 0.75 + mix * 0.25, 0.45 + mix * 0.15);
+                } else if (i < CONFIG.particleCount * 0.90) {
+                    // 20% vertical hyper-beacon axis
+                    const py = (Math.random() - 0.5) * 32;
+                    const r = 0.25 + Math.random() * 0.55;
+                    const ang = Math.random() * Math.PI * 2;
+                    pos9.push(Math.cos(ang) * r, py, Math.sin(ang) * r);
+                    col9.push(0.35, 0.98, 0.82); // electric mint
+                } else {
+                    // 10% spinning dual star rings
+                    const stepRing = i % 2 === 0 ? 1 : -1;
+                    const r = 16.5;
+                    const theta = Math.random() * Math.PI * 2;
+                    pos9.push(Math.cos(theta) * r, stepRing * 3.5, Math.sin(theta) * r);
+                    col9.push(0.02, 0.92, 0.65);
+                }
+            }
+            addShape(9, pos9, col9);
+
+            // ------------------ SHAPE 10: COSMIC GALAXY COLLIDER ------------------
+            const pos10 = [], col10 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const fraction = i / CONFIG.particleCount;
+                if (fraction < 0.46) {
+                    // Galaxy A (Spiraling inward)
+                    const t = Math.random();
+                    const angle = t * Math.PI * 6.5;
+                    const r = t * 14.5 + Math.random() * 0.95;
+                    const gx = -8.5 + Math.cos(angle) * r;
+                    const gy = -2.5 + (Math.random() - 0.5) * 1.5;
+                    const gz = -1.5 + Math.sin(angle) * r;
+                    pos10.push(gx, gy, gz);
+                    
+                    // Hot pink / magenta
+                    const mix = Math.random();
+                    col10.push(0.96, 0.15 + t * 0.15, 0.55 + mix * 0.35);
+                } else if (fraction < 0.92) {
+                    // Galaxy B (Counter spiraling)
+                    const t = Math.random();
+                    const angle = -t * Math.PI * 5.5 + Math.PI;
+                    const r = t * 12.5 + Math.random() * 0.85;
+                    const gx = 8.5 + Math.cos(angle) * r;
+                    const gy = 2.5 + (Math.random() - 0.5) * 1.5;
+                    const gz = 1.5 + Math.sin(angle) * r;
+                    pos10.push(gx, gy, gz);
+                    
+                    // Cyan / cosmic sapphire blue
+                    const mix = Math.random();
+                    col10.push(0.12, 0.55 + mix * 0.35, 0.96);
+                } else {
+                    // Tidal gravity bridge between them
+                    const t = Math.random();
+                    const sx = -8.5 + t * 17.0;
+                    const sy = -2.5 + t * 5.0 + (Math.random() - 0.5) * 2.5;
+                    const sz = -1.5 + t * 3.0 + Math.sin(t * Math.PI) * 4.5;
+                    pos10.push(sx, sy, sz);
+                    
+                    // Pure white stars
+                    col10.push(0.95, 0.95, 1.0);
+                }
+            }
+            addShape(10, pos10, col10);
+
+            // ------------------ SHAPE 11: MÖBIUS RESONATOR ------------------
+            const pos11 = [], col11 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const theta = (i / CONFIG.particleCount) * Math.PI * 2 * 12; // helicoid rotational phase
+                const w = (Math.random() - 0.5) * 5.5; // width of band
+                const R = 11.5;
+                const tx = (R + w * Math.cos(theta * 0.5)) * Math.cos(theta);
+                const ty = (R + w * Math.cos(theta * 0.5)) * Math.sin(theta);
+                const tz = w * Math.sin(theta * 0.5);
+                pos11.push(tx, ty, tz);
+                
+                // Indigo/purple/blue cyclic spectral colouring
+                const hue = (theta * 5.7) % 360;
+                const rgb = hslToRgb(hue, 0.92, 0.56);
+                col11.push(rgb.r, rgb.g, rgb.b);
+            }
+            addShape(11, pos11, col11);
+
+            // ------------------ SHAPE 12: LORENZ ATTRACTOR ------------------
+            const pos12 = [], col12 = [];
+            let lx = 0.1, ly = 0, lz = 0;
+            const sigma_l = 10, rho_l = 28, beta_l = 8/3;
+            const dt_l = 0.007;
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const dx = sigma_l * (ly - lx) * dt_l;
+                const dy = (lx * (rho_l - lz) - ly) * dt_l;
+                const dz = (lx * ly - beta_l * lz) * dt_l;
+                lx += dx;
+                ly += dy;
+                lz += dz;
+                
+                // Scale adjust and center vertically around (0,0,0)
+                pos12.push(lx * 0.68, ly * 0.68, (lz - 24) * 0.68);
+                
+                // Color spectrum tracking chaotic index
+                const colorIdx = i % 3;
+                if (colorIdx === 0) {
+                    col12.push(1.0, 0.08, 0.58); // deep fuchsia
+                } else if (colorIdx === 1) {
+                    col12.push(0.64, 0.11, 0.93); // electric violet
+                } else {
+                    col12.push(0.0, 0.75, 1.0); // neon sky blue
+                }
+            }
+            addShape(12, pos12, col12);
+
+            // ------------------ SHAPE 13: GEODESIC DOME ------------------
+            const pos13 = [], col13 = [];
+            const rDome = 13.5;
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const section = i % 3;
+                if (section === 0) {
+                    // Parallel ring meridians (latitudinal)
+                    const bands = 14;
+                    const b = Math.floor(Math.random() * bands);
+                    const theta = (b / bands) * Math.PI;
+                    const phi = Math.random() * Math.PI * 2;
+                    pos13.push(
+                        rDome * Math.sin(theta) * Math.cos(phi),
+                        rDome * Math.cos(theta),
+                        rDome * Math.sin(theta) * Math.sin(phi)
+                    );
+                    col13.push(0.55, 0.98, 0.08); // lime green
+                } else if (section === 1) {
+                    // Vertical meridian ribs (longitudinal)
+                    const ribs = 18;
+                    const rib = Math.floor(Math.random() * ribs);
+                    const phi = (rib / ribs) * Math.PI * 2;
+                    const theta = Math.random() * Math.PI;
+                    pos13.push(
+                        rDome * Math.sin(theta) * Math.cos(phi),
+                        rDome * Math.cos(theta),
+                        rDome * Math.sin(theta) * Math.sin(phi)
+                    );
+                    col13.push(0.18, 0.85, 0.35); // solid jade green
+                } else {
+                    // Internal core beacon mesh clusters
+                    const u = Math.random();
+                    const theta = Math.acos(2 * Math.random() - 1);
+                    const phi = Math.random() * Math.PI * 2;
+                    const coreRadius = Math.pow(u, 1.8) * 6.5;
+                    pos13.push(
+                        coreRadius * Math.sin(theta) * Math.cos(phi),
+                        coreRadius * Math.cos(theta),
+                        coreRadius * Math.sin(theta) * Math.sin(phi)
+                    );
+                    col13.push(0.95, 0.95, 0.05); // golden cores
+                }
+            }
+            addShape(13, pos13, col13);
+
+            // ------------------ SHAPE 14: SUPERNOVA EXPLOSION ------------------
+            const pos14 = [], col14 = [];
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const group = i % 3;
+                const theta = Math.acos(2 * Math.random() - 1);
+                const phi = Math.random() * Math.PI * 2;
+                
+                if (group === 0) {
+                    // Expansion shell 1
+                    const r = 16.5 + (Math.random() - 0.5) * 1.8;
+                    pos14.push(
+                        r * Math.sin(theta) * Math.cos(phi),
+                        r * Math.cos(theta),
+                        r * Math.sin(theta) * Math.sin(phi)
+                    );
+                    col14.push(0.98, 0.22, 0.04); // blazing red
+                } else if (group === 1) {
+                    // Hyper-expanding particle filaments (high velocity ejecta)
+                    const r = Math.random() * 24.5;
+                    const directionX = Math.sin(theta) * Math.cos(phi);
+                    const directionY = Math.cos(theta);
+                    const directionZ = Math.sin(theta) * Math.sin(phi);
+                    pos14.push(
+                        directionX * r,
+                        directionY * r,
+                        directionZ * r
+                    );
+                    col14.push(0.96, 0.54, 0.08); // glowing fire orange
+                } else {
+                    // Stellar thermal core region (dense leftover white dwarf/neutron mass)
+                    const u = Math.random();
+                    const rCore = Math.pow(u, 2.5) * 3.5;
+                    pos14.push(
+                        rCore * Math.sin(theta) * Math.cos(phi),
+                        rCore * Math.cos(theta),
+                        rCore * Math.sin(theta) * Math.sin(phi)
+                    );
+                    col14.push(1.0, 0.92, 0.85); // glowing white-cyan star remnants
+                }
+            }
+            addShape(14, pos14, col14);
+        }
+
+        // -------------------------------------------------------------
+        // WEBGL ENGINE BOOTSTRAP (THREE.JS)
+        // -------------------------------------------------------------
+        let scene, camera, renderer, particles, particleGeometry;
+        let renderTarget, postScene, postCamera, postMaterial, postQuad;
+        const clock = new THREE.Clock();
+
+        function createGlowSprite() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.12, 'rgba(255, 255, 255, 0.95)');
+            gradient.addColorStop(0.3, 'rgba(235, 248, 255, 0.75)');
+            gradient.addColorStop(0.65, 'rgba(0, 175, 255, 0.22)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x050508, 0.015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 40;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x050508, 1);
+            container.appendChild(renderer.domElement);
+
+            // Construct Particle Buffer Coordinates
+            particleGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(CONFIG.particleCount * 3);
+            const colors = new Float32Array(CONFIG.particleCount * 3);
+
+            // Prime with defaults (Sphere configuration)
+            for(let i=0; i<CONFIG.particleCount * 3; i++) {
+                positions[i] = shapesData[1].positions[i];
+                colors[i] = shapesData[1].colors[i];
+            }
+
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: CONFIG.particleSize,
+                map: createGlowSprite(),
+                vertexColors: true,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                opacity: 0.92
+            });
+
+            particles = new THREE.Points(particleGeometry, material);
+            scene.add(particles);
+
+            // Setup custom post processing render-target offscreen buffers
+            renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter,
+                format: THREE.RGBAFormat
+            });
+
+            postScene = new THREE.Scene();
+            postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+            postMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    tDiffuse: { value: renderTarget.texture },
+                    uTime: { value: 0 },
+                    uGlitch: { value: 0.2 },
+                    uChromatic: { value: 0.4 },
+                    uBloom: { value: 1.2 }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D tDiffuse;
+                    uniform float uTime;
+                    uniform float uGlitch;
+                    uniform float uChromatic;
+                    uniform float uBloom;
+                    varying vec2 vUv;
+ 
+                    float rand(vec2 co) {
+                        return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                    }
+ 
+                    void main() {
+                        vec2 uv = vUv;
+                        
+                        // Analog glitch lines shifting columns at random intervals
+                        if (uGlitch > 0.0) {
+                            float sY = sin(uTime * 14.0 + uv.y * 35.0);
+                            if (sY > (2.0 - uGlitch)) {
+                                uv.x += sin(uTime * 45.0) * uGlitch * 0.015;
+                            }
+                        }
+                        
+                        // Chromatic aberration splits red and blue bands
+                        vec2 offset = vec2(uChromatic * 0.0055, 0.0);
+                        vec4 cr = texture2D(tDiffuse, uv - offset);
+                        vec4 cg = texture2D(tDiffuse, uv);
+                        vec4 cb = texture2D(tDiffuse, uv + offset);
+                        vec4 baseColor = vec4(cr.r, cg.g, cb.b, 1.0);
+                        
+                        // Multi-tap neon glow bloom overlay pass
+                        vec4 blur = vec4(0.0);
+                        float step = 0.0042 * uBloom;
+                        blur += texture2D(tDiffuse, uv + vec2(-step, -step)) * 0.08;
+                        blur += texture2D(tDiffuse, uv + vec2(0.0, -step)) * 0.12;
+                        blur += texture2D(tDiffuse, uv + vec2(step, -step)) * 0.08;
+                        blur += texture2D(tDiffuse, uv + vec2(-step, 0.0)) * 0.12;
+                        blur += texture2D(tDiffuse, uv) * 0.40;
+                        blur += texture2D(tDiffuse, uv + vec2(step, 0.0)) * 0.12;
+                        blur += texture2D(tDiffuse, uv + vec2(-step, step)) * 0.08;
+                        blur += texture2D(tDiffuse, uv + vec2(0.0, step)) * 0.12;
+                        blur += texture2D(tDiffuse, uv + vec2(step, step)) * 0.08;
+                        
+                        vec4 finalColor = baseColor + blur * uBloom * 0.7;
+                        
+                        // Sci-fi analog film scanner noise lines
+                        float grain = (rand(uv + uTime) - 0.5) * 0.06;
+                        finalColor.rgb += vec3(grain);
+                        
+                        gl_FragColor = finalColor;
+                    }
+                `
+            });
+
+            postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMaterial);
+            postScene.add(postQuad);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                if (renderTarget) {
+                    renderTarget.setSize(window.innerWidth, window.innerHeight);
+                }
+            });
+        }
+
+        // -------------------------------------------------------------
+        // ANIMATOR MAIN LOOP
+        // -------------------------------------------------------------
+        let autoYRot = 0;
+
+        function runMainLoop() {
+            requestAnimationFrame(runMainLoop);
+
+            const time = clock.getElapsedTime();
+            const posAttr = particleGeometry.attributes.position;
+            const colAttr = particleGeometry.attributes.color;
+
+            const currPos = posAttr.array;
+            const currCol = colAttr.array;
+
+            const targetPos = shapesData[activeStateId].positions;
+            const targetCol = shapesData[activeStateId].colors;
+
+            // Decay hand state diagnostics if silence triggers
+            if (isHandActive && Date.now() - lastHandActiveTime > 1200) {
+                isHandActive = false;
+                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-slate-500 animate-pulse";
+                document.getElementById('status-text').innerText = "CAMERA ACTIVE // WAITING FOR DIRECTIVE";
+                document.getElementById('prev-overlay-indicator').className = "w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse";
+                updateDirectionUI('center');
+            }
+
+            // Normal dynamic scale breathing if passive dashboard is engaged
+            let currTension = 1.0;
+            if (isHandActive) {
+                // Expansion is directly coupled with the palm tension metric (fist is lower)
+                currTension = 0.55 + tensionLevel * 0.85;
+            } else {
+                currTension = 1.0 + Math.sin(time * 1.6) * 0.12;
+            }
+
+            // Identify attractor point for multi-hand fields
+            let attractorPt = null;
+            if (isHand2Active) {
+                attractorPt = new THREE.Vector3(hand2X * 35, -hand2Y * 25, (hand2Tension - 0.5) * 15);
+            }
+
+            // Lerping particle vectors & spectral vertex coloring
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const i3 = i * 3;
+
+                let tx = targetPos[i3] * currTension;
+                let ty = targetPos[i3+1] * currTension;
+                let tz = targetPos[i3+2] * currTension;
+
+                // Add organic life micro-vibrations
+                const activeWobble = CONFIG.wobbleAmplitude * (isHandActive ? (0.6 + Math.sin(time + i)) : 0.9);
+                tx += Math.sin(time * CONFIG.wobbleSpeed + i * 0.12) * activeWobble;
+                ty += Math.cos(time * CONFIG.wobbleSpeed * 1.1 + i * 0.08) * activeWobble;
+                tz += Math.sin(time * CONFIG.wobbleSpeed * 0.9 + i * 0.15) * activeWobble;
+
+                // Dynamic secondary force field logic (pull, repel, or orbit)
+                if (isHand2Active && attractorPt) {
+                    const dx = tx - attractorPt.x;
+                    const dy = ty - attractorPt.y;
+                    const dz = tz - attractorPt.z;
+                    const dist = Math.hypot(dx, dy, dz) + 0.1;
+
+                    if (hand2Fingers <= 1) {
+                        // GRAVITATIONAL PULL: slide particles inward to attractor
+                        const pullStrength = 8.5 * hand2Tension;
+                        tx -= (dx / dist) * pullStrength;
+                        ty -= (dy / dist) * pullStrength;
+                        tz -= (dz / dist) * pullStrength;
+                    } else if (hand2Fingers >= 4) {
+                        // FORCE EXPLOSION: push particles outward from attractor
+                        const repelStrength = 18.0 * hand2Tension;
+                        const forceFactor = Math.max(0.0, 1.0 - dist / 30.0);
+                        tx += (dx / dist) * repelStrength * forceFactor;
+                        ty += (dy / dist) * repelStrength * forceFactor;
+                        tz += (dz / dist) * repelStrength * forceFactor;
+                    } else {
+                        // ORBITAL SOLAR VORTEX: spin particles around attractor axis
+                        const speed = 0.16 * hand2Tension;
+                        const rotatedX = attractorPt.x + dx * Math.cos(speed) - dz * Math.sin(speed);
+                        const rotatedZ = attractorPt.z + dx * Math.sin(speed) + dz * Math.cos(speed);
+                        tx = rotatedX;
+                        tz = rotatedZ;
+                        ty += (attractorPt.y - ty) * 0.12 * hand2Tension;
+                    }
+                }
+
+                // Position Lerping
+                currPos[i3]   += (tx - currPos[i3]) * CONFIG.lerpSpeed;
+                currPos[i3+1] += (ty - currPos[i3+1]) * CONFIG.lerpSpeed;
+                currPos[i3+2] += (tz - currPos[i3+2]) * CONFIG.lerpSpeed;
+
+                // Color Lerping
+                currCol[i3]   += (targetCol[i3] - currCol[i3]) * CONFIG.lerpSpeed;
+                currCol[i3+1] += (targetCol[i3+1] - currCol[i3+1]) * CONFIG.lerpSpeed;
+                currCol[i3+2] += (targetCol[i3+2] - currCol[i3+2]) * CONFIG.lerpSpeed;
+            }
+
+            posAttr.needsUpdate = true;
+            colAttr.needsUpdate = true;
+
+            // Momentum-coupled Rotation 
+            autoYRot += CONFIG.baseRotationSpeed;
+            particles.rotation.y = autoYRot;
+
+            if (isHandActive) {
+                // Hand orientation offsets control particle scene tilt
+                const targetRotX = handY * 1.5;
+                const targetRotZ = -handX * 1.5;
+                particles.rotation.x += (targetRotX - particles.rotation.x) * 0.08;
+                particles.rotation.z += (targetRotZ - particles.rotation.z) * 0.08;
+            } else {
+                // Restore horizontal tilt slowly when idle
+                particles.rotation.x += (0 - particles.rotation.x) * 0.04;
+                particles.rotation.z += (0 - particles.rotation.z) * 0.04;
+            }
+
+            // Sync custom shader parameters & render offscreen post-processing pipeline
+            if (postMaterial) {
+                postMaterial.uniforms.uTime.value = time;
+                postMaterial.uniforms.uBloom.value = shaderParams.bloom;
+                postMaterial.uniforms.uChromatic.value = shaderParams.chromatic;
+                postMaterial.uniforms.uGlitch.value = shaderParams.glitch;
+                postMaterial.uniforms.tDiffuse.value = renderTarget.texture;
+            }
+
+            if (renderTarget && postScene && postCamera) {
+                // 1: Render original particle scene onto offscreen rendering buffer target
+                renderer.setRenderTarget(renderTarget);
+                renderer.render(scene, camera);
+
+                // 2: Composite post-processing shader-effects and render output to system viewport
+                renderer.setRenderTarget(null);
+                renderer.render(postScene, postCamera);
+            } else {
+                // Fallback standard direct renderer call
+                renderer.render(scene, camera);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // MEDIAPIPE COMPUTER VISION HAND PIPELINE
+        // -------------------------------------------------------------
+        let handsPipe;
+        let webcamStream = null;
+
+        const FALLBACK_HANDS_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [5, 9], [9, 10], [10, 11], [11, 12],
+            [9, 13], [13, 14], [14, 15], [15, 16],
+            [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]
+        ];
+
+        // Direction compass diagnostics styling swapper
+        function updateDirectionUI(dir) {
+            const dixs = ['up', 'down', 'left', 'right', 'center'];
+            dixs.forEach(item => {
+                const node = document.getElementById(`dir-${item}`);
+                if (!node) return;
+                if (item === dir.toLowerCase()) {
+                    node.className = "py-1.5 rounded border border-cyan-500/40 bg-cyan-950/20 text-cyan-400 font-bold transition-all duration-200 shadow-[0_0_10px_rgba(77,238,234,0.15)]";
+                } else {
+                    node.className = "py-1.5 rounded bg-slate-950/80 border border-slate-900 transition-all duration-200 text-slate-700 font-bold";
+                }
+            });
+        }
+
+        function startMediaPipeEngine() {
+            handsPipe = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            handsPipe.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.55,
+                minTrackingConfidence: 0.55
+            });
+
+            handsPipe.onResults(handleTrackingOutput);
+        }
+
+        function handleTrackingOutput(results) {
+            const canvasEl = document.getElementById('camera-canvas');
+            const ctx = canvasEl.getContext('2d');
+            
+            ctx.save();
+            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+            
+            // Mirror frame representation visually
+            ctx.translate(canvasEl.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(results.image, 0, 0, canvasEl.width, canvasEl.height);
+
+            const numHands = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+
+            if (numHands > 0) {
+                isHandActive = true;
+                lastHandActiveTime = Date.now();
+
+                const landmarks = results.multiHandLandmarks[0];
+
+                // BIND DETECTED STABILITY DOTS
+                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse";
+                document.getElementById('status-text').innerText = numHands === 1 ? "TRACKING PRIMARY" : "DYNAMIC MULTI-HAND ACTIVE";
+                document.getElementById('prev-overlay-indicator').className = "w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse";
+
+                // Draw skeleton landmarks inside our mirrored context
+                const connections = connections = FALLBACK_HANDS_CONNECTIONS;
+                
+                for (let h = 0; h < numHands; h++) {
+                    const lms = results.multiHandLandmarks[h];
+                    const bondColor = h === 0 ? '#f72585' : '#eab308';
+                    const nodeColor = h === 0 ? '#4deeea' : '#fb923c';
+                    drawConnectors(ctx, lms, connections, { color: bondColor, lineWidth: 2.5 });
+                    drawLandmarks(ctx, lms, { color: nodeColor, lineWidth: 1.2, radius: 2.5 });
+                }
+
+                // A: Gesture finger-count classification algorithm
+                let fingersExtended = countExtendedKnuckles(landmarks);
+                if (numHands >= 2) {
+                    const lms2 = results.multiHandLandmarks[1];
+                    fingersExtended += countExtendedKnuckles(lms2);
+                }
+                
+                // Keep UI updated in auto mode
+                if (mode === 'auto' && fingersExtended !== prevFingerCount) {
+                    prevFingerCount = fingersExtended;
+                    // Cap state transitions from 0 to 14 shapes
+                    const targetShapeId = Math.min(14, fingersExtended);
+                    triggerMorphState(targetShapeId);
+                }
+
+                // B: Cohesion tension detection (fist contraction scale)
+                const scale = Math.hypot(landmarks[9].x - landmarks[0].x, landmarks[9].y - landmarks[0].y);
+                if (scale > 0.02) {
+                    const tipsList = [4, 8, 12, 16, 20];
+                    let sumDists = 0;
+                    for (const tip of tipsList) {
+                        sumDists += Math.hypot(landmarks[tip].x - landmarks[0].x, landmarks[tip].y - landmarks[0].y) / scale;
+                    }
+                    const avgTipDistance = sumDists / 5;
+                    let normalizedTension = (avgTipDistance - 1.05) / 1.05;
+                    tensionLevel = Math.max(0.0, Math.min(1.0, normalizedTension));
+                    
+                    document.getElementById('tension-percentage').innerText = `${Math.round(tensionLevel * 100)}%`;
+                    document.getElementById('tension-bar').style.width = `${Math.round(tensionLevel * 100)}%`;
+                }
+
+                // C: Coordinates track translation mapping
+                const spatialX = 1.0 - landmarks[0].x; 
+                const spatialY = landmarks[0].y;      
+
+                handX = spatialX - 0.5;
+                handY = spatialY - 0.5;
+
+                // Direction UI diagnostics updater
+                let dirLabel = 'CENTER';
+                if (spatialX < 0.38) dirLabel = 'LEFT';
+                else if (spatialX > 0.62) dirLabel = 'RIGHT';
+                else if (spatialY < 0.36) dirLabel = 'UP';
+                else if (spatialY > 0.64) dirLabel = 'DOWN';
+
+                updateDirectionUI(dirLabel);
+
+                // D: SECONDARY HAND CORES
+                if (numHands >= 2) {
+                    isHand2Active = true;
+                    const landmarks2 = results.multiHandLandmarks[1];
+                    const h2x = 1.0 - landmarks2[0].x;
+                    const h2y = landmarks2[0].y;
+
+                    hand2X = h2x - 0.5;
+                    hand2Y = h2y - 0.5;
+                    hand2Fingers = countExtendedKnuckles(landmarks2);
+
+                    const scale2 = Math.hypot(landmarks2[9].x - landmarks2[0].x, landmarks2[9].y - landmarks2[0].y);
+                    if (scale2 > 0.02) {
+                        const tipsList2 = [4, 8, 12, 16, 20];
+                        let sumDists2 = 0;
+                        for (const tip of tipsList2) {
+                            sumDists2 += Math.hypot(landmarks2[tip].x - landmarks2[0].x, landmarks2[tip].y - landmarks2[0].y) / scale2;
+                        }
+                        const avgTipDistance2 = sumDists2 / 5;
+                        let normalizedTension2 = (avgTipDistance2 - 1.05) / 1.05;
+                        hand2Tension = Math.max(0.0, Math.min(1.0, normalizedTension2));
+                    }
+
+                    const h2Status = document.getElementById('h2-status');
+                    h2Status.innerText = "CONNECTED";
+                    h2Status.className = "text-[8.5px] font-mono font-bold text-emerald-400 bg-emerald-950/40 py-0.5 px-2 rounded border border-emerald-800 tracking-wider shadow-[0_0_8px_rgba(52,211,153,0.2)]";
+
+                    const h2Mode = document.getElementById('h2-mode');
+                    if (hand2Fingers <= 1) {
+                        h2Mode.innerText = "GRAVITATIONAL PULL (INWARD)";
+                        h2Mode.className = "text-[9.5px] font-mono font-extrabold text-cyan-400";
+                    } else if (hand2Fingers >= 4) {
+                        h2Mode.innerText = "FORCE EXPLOSION (OUTWARD)";
+                        h2Mode.className = "text-[9.5px] font-mono font-extrabold text-pink-500";
+                    } else {
+                        h2Mode.innerText = "ORBITAL SOLAR VORTEX";
+                        h2Mode.className = "text-[9.5px] font-mono font-extrabold text-yellow-400";
+                    }
+
+                    document.getElementById('h2-coord-x').innerText = (hand2X * 2).toFixed(2);
+                    document.getElementById('h2-coord-y').innerText = (-hand2Y * 2).toFixed(2);
+                } else {
+                    isHand2Active = false;
+                    resetSecondaryHandUI();
+                }
+
+            } else {
+                isHand2Active = false;
+                resetSecondaryHandUI();
+            }
+            ctx.restore();
+        }
+
+        function resetSecondaryHandUI() {
+            const h2Status = document.getElementById('h2-status');
+            if (h2Status) {
+                h2Status.innerText = "DISCONNECTED";
+                h2Status.className = "text-[8.5px] font-mono font-bold text-slate-500 bg-slate-950 py-0.5 px-2 rounded border border-slate-800 tracking-wider";
+            }
+            const h2Mode = document.getElementById('h2-mode');
+            if (h2Mode) {
+                h2Mode.innerText = "IDLE";
+                h2Mode.className = "text-[9.5px] font-mono font-bold text-slate-500";
+            }
+            const h2x = document.getElementById('h2-coord-x');
+            if (h2x) h2x.innerText = "-";
+            const h2y = document.getElementById('h2-coord-y');
+            if (h2y) h2y.innerText = "-";
+        }
+
+        function countExtendedKnuckles(landmarks) {
+            // Y values: smaller means higher on screen space
+            const indexIsExtended  = landmarks[8].y  < landmarks[6].y;
+            const middleIsExtended = landmarks[12].y < landmarks[10].y;
+            const ringIsExtended   = landmarks[16].y < landmarks[14].y;
+            const pinkyIsExtended  = landmarks[20].y < landmarks[18].y;
+
+            // Robust palm-to-thumb distance threshold check (rotation invariant)
+            const distThumbToPalm = Math.hypot(landmarks[4].x - landmarks[9].x, landmarks[4].y - landmarks[9].y);
+            const distBaseToPalm  = Math.hypot(landmarks[2].x - landmarks[9].x, landmarks[2].y - landmarks[9].y);
+            const thumbIsExtended = distThumbToPalm > distBaseToPalm * 1.35;
+
+            let fingers = 0;
+            if (thumbIsExtended) fingers++;
+            if (indexIsExtended) fingers++;
+            if (middleIsExtended) fingers++;
+            if (ringIsExtended) fingers++;
+            if (pinkyIsExtended) fingers++;
+
+            return fingers;
+        }
+
+        // -------------------------------------------------------------
+        // APPLICATION CORE STATE SWITCHES
+        // -------------------------------------------------------------
+        function triggerMorphState(id) {
+            activeStateId = id;
+            
+            // Sync diagnostics UI texts
+            const stateMeta = SCENE_STATES.find(s => s.id === id);
+            if (stateMeta) {
+                document.getElementById('gesture-count').innerText = stateMeta.id;
+                const gName = document.getElementById('gesture-name');
+                gName.innerText = stateMeta.name;
+                gName.style.color = stateMeta.color;
+
+                // Synchronize Active Button Highlighting Glow
+                const btnIds = ['scatter', 'sphere', 'cube', 'heart', 'saturn', 'vortex', 'torus', 'helix', 'terrain', 'octahedron', 'galaxy', 'mobius', 'lorenz', 'dome', 'supernova'];
+                btnIds.forEach((bName, index) => {
+                    const btn = document.getElementById(`btn-${bName}`);
+                    if (!btn) return;
+                    if (index === id) {
+                        btn.className = "py-2 px-2 rounded-lg bg-slate-900 border text-[10px] font-mono font-bold tracking-wider text-white border-cyan-500/80 shadow-[0_0_8px_rgba(77,238,234,0.35)] transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5" + (bName === 'supernova' ? " col-span-2" : "");
+                    } else {
+                        btn.className = "py-2 px-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono font-semibold tracking-wider text-slate-500 hover:text-slate-300 transition-all duration-300 cursor-pointer text-left pl-2.5 flex items-center gap-1.5" + (bName === 'supernova' ? " col-span-2" : "");
+                    }
+                });
+            }
+        }
+
+        function setOperatingMode(newMode) {
+            mode = newMode;
+            const autoBtn = document.getElementById('mode-auto');
+            const manualBtn = document.getElementById('mode-manual');
+            
+            if (mode === 'auto') {
+                autoBtn.className = "py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-cyan-400 bg-cyan-950/30 border border-cyan-900/50 transition-all cursor-pointer";
+                manualBtn.className = "py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-slate-500 transition-all cursor-pointer hover:text-slate-300";
+            } else {
+                manualBtn.className = "py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-cyan-400 bg-cyan-950/30 border border-cyan-900/50 transition-all cursor-pointer";
+                autoBtn.className = "py-1.5 px-3 rounded-lg font-mono text-[10px] font-bold tracking-wider text-slate-500 transition-all cursor-pointer hover:text-slate-300";
+                
+                // Neutralize hand feedback loops
+                isHandActive = false;
+                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-slate-600 animate-pulse";
+                document.getElementById('status-text').innerText = "MANUAL CONTROLS SECURED";
+                document.getElementById('prev-overlay-indicator').className = "w-1.5 h-1.5 rounded-full bg-gray-500";
+                updateDirectionUI('center');
+            }
+        }
+
+        // -------------------------------------------------------------
+        // HARDWARE CAPTURE & WEBCAM STAGE INITIALIZATION
+        // -------------------------------------------------------------
+        let grabberObject = null;
+
+        async function stageHardwareWebcam() {
+            const videoEl = document.getElementById('webcam-video');
+            const canvasEl = document.getElementById('camera-canvas');
+            
+            canvasEl.width = 180;
+            canvasEl.height = 140;
+
+            updateLoadingDiagnostic("COMMENCING WEBCAM SUBSYSTEMS...", 45);
+
+            try {
+                webcamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: "user" },
+                    audio: false
+                });
+                
+                videoEl.srcObject = webcamStream;
+                await videoEl.play();
+
+                updateLoadingDiagnostic("COUPLE MEDIAPIPE CONVOLUTION MATRIX...", 75);
+                
+                grabberObject = new Camera(videoEl, {
+                    onFrame: async () => {
+                        if (mode === 'auto') {
+                            await handsPipe.send({ image: videoEl });
+                        }
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                grabberObject.start()
+                    .then(() => {
+                        concludeLauncher();
+                    })
+                    .catch(err => {
+                        console.warn("MediaPipe camera grabber initialization failed, deploying fallback interval loop:", err);
+                        videoEl.ontimeupdate = async () => {
+                            if (mode === 'auto') {
+                                await handsPipe.send({ image: videoEl });
+                            }
+                        };
+                        concludeLauncher();
+                    });
+
+            } catch (err) {
+                console.error("Camera interface deployment crashed:", err);
+                triggerCameraWarningToast();
+                setOperatingMode('manual');
+                concludeLauncher();
+            }
+        }
+
+        function triggerCameraWarningToast() {
+            const toast = document.getElementById('toast-warning');
+            toast.className = "absolute top-6 left-1/2 -translate-x-1/2 glass-panel border-amber-500/30 text-amber-200 px-4 py-3 rounded-xl z-50 text-xs flex items-center gap-3 transition-all duration-500 transform translate-y-0 opacity-100";
+            
+            document.getElementById('close-toast').onclick = () => {
+                toast.className = "absolute top-6 left-1/2 -translate-x-1/2 glass-panel border-amber-500/30 text-amber-200 px-4 py-3 rounded-xl z-50 text-xs flex items-center gap-3 transition-all duration-500 transform translate-y-[-100px] opacity-0 pointer-events-none";
+            };
+        }
+
+        // -------------------------------------------------------------
+        // LOADING OVERLAY CONTROLLERS
+        // -------------------------------------------------------------
+        function updateLoadingDiagnostic(text, progress) {
+            document.getElementById('loading-text').innerText = text;
+            document.getElementById('loading-progress').style.width = `${progress}%`;
+        }
+
+        function concludeLauncher() {
+            updateLoadingDiagnostic("COMPLETING LAUNCH VECTOR...", 100);
+            setTimeout(() => {
+                const overlay = document.getElementById('loading-overlay');
+                overlay.className = "absolute inset-0 bg-[#050508] z-50 flex flex-col items-center justify-center transition-all duration-1000 transform scale-110 pointer-events-none opacity-0";
+            }, 600);
+        }
+
+        // -------------------------------------------------------------
+        // APP ENTRANCE POINT MAIN
+        // -------------------------------------------------------------
+        window.addEventListener('DOMContentLoaded', () => {
+            // A: Generate quantum geometry coordinates profiles
+            updateLoadingDiagnostic("STAGING THREE.JS SHADER COMPILING...", 15);
+            designQuantumShapes();
+
+            // B: Setup graphic cards context
+            updateLoadingDiagnostic("COMPILING CORE GLOW RENDERS...", 30);
+            initThreeJS();
+
+            // C: Initialize state transitions UI components
+            triggerMorphState(1); // Prime default sphere configuration
+
+            // D: Launch trackers pipelines
+            startMediaPipeEngine();
+
+            // E: Mount tactile events binds
+            document.getElementById('mode-auto').onclick = () => setOperatingMode('auto');
+            document.getElementById('mode-manual').onclick = () => setOperatingMode('manual');
+
+            // Interactive Panel Toggles for Mobile & Tablet Optimization
+            const leftPanel = document.getElementById('left-hud-panel');
+            const toggleHudBtn = document.getElementById('topbar-toggle-hud');
+            const cameraPanel = document.getElementById('camera-widget-panel');
+            const toggleCameraBtn = document.getElementById('topbar-toggle-camera');
+
+            function toggleHud(forceState) {
+                const isCollapsed = forceState !== undefined ? 
+                    leftPanel.classList.toggle('collapsed', forceState) : 
+                    leftPanel.classList.toggle('collapsed');
+                
+                if (isCollapsed) {
+                    toggleHudBtn.className = "ml-1 sm:ml-2 py-1 px-2.5 rounded bg-slate-900 border border-slate-800 text-[8.5px] font-mono tracking-wider font-bold text-slate-500 hover:text-white transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer";
+                } else {
+                    toggleHudBtn.className = "ml-1 sm:ml-2 py-1 px-2.5 rounded bg-cyan-950/40 border border-cyan-800 text-[8.5px] font-mono tracking-wider font-bold text-cyan-400 hover:text-white transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer shadow-[0_0_8px_rgba(34,211,238,0.25)]";
+                }
+            }
+
+            function toggleCamera(forceState) {
+                const isCollapsed = forceState !== undefined ? 
+                    cameraPanel.classList.toggle('collapsed', forceState) : 
+                    cameraPanel.classList.toggle('collapsed');
+                
+                if (isCollapsed) {
+                    toggleCameraBtn.className = "py-1 px-2 sm:px-2.5 rounded bg-slate-900 border border-slate-800 text-[8.5px] font-mono tracking-wider font-bold text-slate-500 hover:text-white transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer";
+                } else {
+                    toggleCameraBtn.className = "py-1 px-2 sm:px-2.5 rounded bg-pink-950/40 border border-pink-800 text-[8.5px] font-mono tracking-wider font-bold text-pink-500 hover:text-white transition-all duration-300 flex items-center gap-1 active:scale-95 cursor-pointer shadow-[0_0_8px_rgba(244,63,94,0.25)]";
+                }
+            }
+
+            if (toggleHudBtn) toggleHudBtn.onclick = () => toggleHud();
+            if (toggleCameraBtn) toggleCameraBtn.onclick = () => toggleCamera();
+
+            // Keyboard hotkeys: 'h' for Console, 'c' for Camera Stream
+            window.addEventListener('keydown', (e) => {
+                if (e.target.tagName && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+                const key = e.key.toLowerCase();
+                if (key === 'h') {
+                    toggleHud();
+                } else if (key === 'c') {
+                    toggleCamera();
+                }
+            });
+
+            // Automatically collapse panels on initial load for tablets and mobile viewports
+            if (window.innerWidth < 1024) {
+                toggleHud(true);
+                toggleCamera(true);
+            }
+
+            // Binds state overrides
+            const overrides = ['scatter', 'sphere', 'cube', 'heart', 'saturn', 'vortex', 'torus', 'helix', 'terrain', 'octahedron', 'galaxy', 'mobius', 'lorenz', 'dome', 'supernova'];
+            overrides.forEach((mKey, idx) => {
+                const btn = document.getElementById(`btn-${mKey}`);
+                if (btn) {
+                    btn.onclick = () => {
+                        setOperatingMode('manual');
+                        triggerMorphState(idx);
+                    };
+                }
+            });
+
+            // Connect shader parameters sliders
+            const sliderBloom = document.getElementById('slider-bloom');
+            if (sliderBloom) {
+                sliderBloom.oninput = (e) => {
+                    const val = parseFloat(e.target.value);
+                    shaderParams.bloom = val;
+                    document.getElementById('label-val-bloom').innerText = val.toFixed(1) + 'x';
+                };
+            }
+
+            const sliderChromatic = document.getElementById('slider-chromatic');
+            if (sliderChromatic) {
+                sliderChromatic.oninput = (e) => {
+                    const val = parseFloat(e.target.value);
+                    shaderParams.chromatic = val;
+                    document.getElementById('label-val-chromatic').innerText = val.toFixed(1) + 'x';
+                };
+            }
+
+            const sliderGlitch = document.getElementById('slider-glitch');
+            if (sliderGlitch) {
+                sliderGlitch.oninput = (e) => {
+                    const val = parseFloat(e.target.value);
+                    shaderParams.glitch = val;
+                    document.getElementById('label-val-glitch').innerText = val.toFixed(1) + 'x';
+                };
+            }
+
+            // Bypass loader buttons
+            document.getElementById('skip-loader-btn').onclick = () => {
+                setOperatingMode('manual');
+                concludeLauncher();
+            };
+
+            // Trigger actual hardware cameras staging
+            stageHardwareWebcam();
+
+            // Initiate dynamic tick
+            runMainLoop();
+
+            // Start clock
+            setInterval(() => {
+                const now = new Date();
+                const lString = now.toISOString().substring(11, 19);
+                document.getElementById('clock-display').innerText = lString;
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
